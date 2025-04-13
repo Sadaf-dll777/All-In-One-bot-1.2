@@ -1,6 +1,6 @@
 const client = require('./main');
 require('./bot');
-require('./shiva');
+require('./sadaf');
 
 const loadEventHandlers = () => {
     const colors = require('./UI/colors/colors');
@@ -101,7 +101,7 @@ const loadEventHandlers = () => {
     require('./events/music')(client);
     logSystem('LAVALINK MUSIC');
 
-    require('./shiva');
+    require('./sadaf');
     console.log(`\n${colors.magenta}${colors.bright}🎵 DISTUBE SYSTEM${colors.reset}`);
     require('./handlers/distube')(client);
    
