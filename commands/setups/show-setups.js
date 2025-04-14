@@ -1,195 +1,204 @@
-/*
-
-☆.。.:*・°☆.。.:*・°☆.。.:*・°☆.。.:*・°☆
-                                                 
-  _________ ___ ___ ._______   _________    
- /   _____//   |   \|   \   \ /   /  _  \   
- \_____  \/    ~    \   |\   Y   /  /_\  \  
- /        \    Y    /   | \     /    |    \ 
-/_______  /\___|_  /|___|  \___/\____|__  / 
-        \/       \/                     \/  
-                    
-DISCORD :  https://discord.com/invite/xQF9f9yUEM                   
-YouTube : https://www.youtube.com/@GlaceYT                         
-
-Command Verified : ✓  
-Website        : ssrr.tech  
-Test Passed    : ✓
-
-☆.。.:*・°☆.。.:*・°☆.。.:*・°☆.。.:*・°☆
-*/
-
-
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
-const { ticketsCollection, voiceChannelCollection, nqnCollection, welcomeCollection, giveawayCollection, autoroleCollection, serverConfigCollection, antisetupCollection, serverLevelingLogsCollection } = require('../../mongodb');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { botStatusCollection } = require('../../mongodb');
+const { ActivityType } = require('discord.js');
+const config = require('../../config');
 const cmdIcons = require('../../UI/icons/commandicons');
-const checkPermissions = require('../../utils/checkPermissions');
+
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('show-setups')
-        .setDescription('Displays the ticket, voice channel, NQN, welcome, auto-role, and anti setups for this server')
-        .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
+        .setName('setup-status')
+        .setDescription('View or change the bot\'s presence')
+        .addSubcommand(sub =>
+            sub.setName('add')
+                .setDescription('Add a custom status to rotation')
+                .addStringOption(opt =>
+                    opt.setName('status')
+                        .setDescription('Bot status')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: 'Online', value: 'online' },
+                            { name: 'Idle', value: 'idle' },
+                            { name: 'Do Not Disturb', value: 'dnd' },
+                        ))
+                .addStringOption(opt =>
+                    opt.setName('activity')
+                        .setDescription('Activity text (use placeholders like {members}, {servers}, {channels})')
+                        .setRequired(true))
+                .addStringOption(opt =>
+                    opt.setName('type')
+                        .setDescription('Activity type')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: 'Playing', value: 'Playing' },
+                            { name: 'Watching', value: 'Watching' },
+                            { name: 'Listening', value: 'Listening' },
+                            { name: 'Streaming', value: 'Streaming' },
+                        ))
+                .addStringOption(opt =>
+                    opt.setName('streamurl')
+                        .setDescription('Twitch Stream URL (only for Streaming activity)')
+                        .setRequired(false))
+        )
+        .addSubcommand(sub =>
+            sub.setName('view')
+                .setDescription('View all custom statuses in rotation')
+        )
+        .addSubcommand(sub =>
+            sub.setName('remove')
+                .setDescription('Remove a custom status from rotation')
+                .addIntegerOption(opt =>
+                    opt.setName('index')
+                        .setDescription('Index of the status to remove (use /setup-status view to see indices)')
+                        .setRequired(true))
+        )
+        .addSubcommand(sub =>
+            sub.setName('interval')
+                .setDescription('Set the interval for status rotation')
+                .addIntegerOption(opt =>
+                    opt.setName('seconds')
+                        .setDescription('Interval in seconds (default: 10)')
+                        .setRequired(true)
+                        .setMinValue(5)
+                        .setMaxValue(300))
+        )
+        .addSubcommand(sub =>
+            sub.setName('toggle')
+                .setDescription('Toggle between default rotation and custom rotation')
+                .addBooleanOption(opt =>
+                    opt.setName('use_custom')
+                        .setDescription('Use custom rotation instead of default')
+                        .setRequired(true))
+        )
+        .addSubcommand(sub =>
+            sub.setName('reset')
+                .setDescription('Reset to default rotating activities')
+        ),
+
     async execute(interaction) {
-        if (!await checkPermissions(interaction)) return;
-        const guildId = interaction.guild.id;
+        if (interaction.isCommand && interaction.isCommand()) {
+            await interaction.deferReply({ ephemeral: true });
+            const subcommand = interaction.options.getSubcommand();
+            const client = interaction.client;
+            
+            if (interaction.user.id !== config.ownerId) {
+                return interaction.editReply({
+                    content: '❌ Only the **bot owner** can use this command.',
+                    ephemeral: true
+                });
+            }
+            
+            if (subcommand === 'add') {
+                const status = interaction.options.getString('status');
+                const activityRaw = interaction.options.getString('activity');
+                const type = interaction.options.getString('type');
+                const streamurl = interaction.options.getString('streamurl') || null;
 
-        try {
-            // Fetching data from MongoDB collections
-            const serverConfig = await serverConfigCollection.findOne({ serverId: guildId });
-            const ticketSetup = await ticketsCollection.findOne({ serverId: guildId });
-            const voiceChannelSetup = await voiceChannelCollection.findOne({ serverId: guildId });
-            const nqnSetup = await nqnCollection.findOne({ serverId: guildId });
-            const welcomeSetup = await welcomeCollection.findOne({ serverId: guildId });
-            const autoroleSetup = await autoroleCollection.findOne({ serverId: guildId });
-            const antiSetup = await antisetupCollection.findOne({ serverId: guildId });
-            const activeGiveaways = await giveawayCollection.find({ channel: { $exists: true } }).toArray();
-            const giveawayCount = activeGiveaways.length;
-            // Fetch leveling setup
-            const levelingSetup = await serverLevelingLogsCollection.findOne({ serverId: guildId });
-            const levelingStatus = levelingSetup?.levelingEnabled ? 'Enabled ✅' : 'Disabled ❌';
-            const levelingChannel = levelingSetup?.levelLogsChannelId ? `<#${levelingSetup.levelLogsChannelId}>` : 'N/A';
-            const prefix = serverConfig?.prefix || 'Not Set';
-            const embeds = [];
+                if (type === 'Streaming' && (!streamurl || !streamurl.startsWith('https://www.twitch.tv/'))) {
+                    return interaction.editReply('❌ You must provide a valid Twitch stream URL for streaming activities.');
+                }
 
-            // Main Embed for General Setups
-            const mainEmbed = new EmbedBuilder()
-                .setColor(0x0099ff)
-                .setTitle('Server Setups')
-                .addFields({ name: 'Prefix', value: prefix, inline: true },
-                    { name: 'Leveling System', value: levelingStatus, inline: true },
-                    { name: 'Leveling Logs Channel', value: levelingChannel, inline: true }
-                )
+                // Create status object
+                const statusObj = {
+                    status,
+                    activity: activityRaw,
+                    type,
+                    url: streamurl || null,
+                };
+
+                // Get current document or create new one
+                let statusDoc = await botStatusCollection.findOne({}) || { 
+                    useCustom: false, 
+                    customRotation: [],
+                    interval: 10
+                };
+                
+                if (!statusDoc.customRotation) {
+                    statusDoc.customRotation = [];
+                }
+                
+                // Limit to 3 custom rotations
+                if (statusDoc.customRotation.length >= 3) {
+                    return interaction.editReply('❌ You can only have 3 custom statuses in rotation. Remove one first with `/setup-status remove`.');
+                }
+                
+                // Add the new status to the rotation
+                statusDoc.customRotation.push(statusObj);
+                
+                // Save to database
+                await botStatusCollection.updateOne({}, { $set: statusDoc }, { upsert: true });
+                
+                return interaction.editReply(`✅ Added custom status to rotation: **${status}**, activity: **${type} ${activityRaw}**`);
+
+            } else if (subcommand === 'view') {
+                const statusDoc = await botStatusCollection.findOne({});
+                if (!statusDoc || !statusDoc.customRotation || statusDoc.customRotation.length === 0) {
+                    return interaction.editReply('ℹ️ No custom rotation statuses set. Add some with `/setup-status add`.');
+                }
+
+                const rotationList = statusDoc.customRotation.map((status, index) => {
+                    const urlPart = status.url ? ` (URL: ${status.url})` : '';
+                    return `**${index + 1}.** ${status.status} - ${status.type} **${status.activity}**${urlPart}`;
+                }).join('\n');
+
+                const activeMode = statusDoc.useCustom ? 'Custom rotation' : 'Default rotation';
+                const intervalMsg = `Interval: **${statusDoc.interval || 10}** seconds`;
+
+                return interaction.editReply(`📋 **Custom Status Rotation (${statusDoc.customRotation.length}/3)**\n\n${rotationList}\n\n${intervalMsg}\n**Active Mode:** ${activeMode}`);
+
+            } else if (subcommand === 'remove') {
+                const index = interaction.options.getInteger('index') - 1;  // Convert to zero-based
+                
+                const statusDoc = await botStatusCollection.findOne({});
+                if (!statusDoc || !statusDoc.customRotation || !statusDoc.customRotation[index]) {
+                    return interaction.editReply('❌ Invalid index or no custom rotation found.');
+                }
+                
+                const removed = statusDoc.customRotation.splice(index, 1)[0];
+                await botStatusCollection.updateOne({}, { $set: { customRotation: statusDoc.customRotation } });
+                
+                return interaction.editReply(`✅ Removed status: **${removed.status}** - ${removed.type} **${removed.activity}**`);
+
+            } else if (subcommand === 'interval') {
+                const seconds = interaction.options.getInteger('seconds');
+                
+                await botStatusCollection.updateOne({}, { $set: { interval: seconds } }, { upsert: true });
+                
+                return interaction.editReply(`⏱️ Status rotation interval set to **${seconds}** seconds.`);
+
+            } else if (subcommand === 'toggle') {
+                const useCustom = interaction.options.getBoolean('use_custom');
+                
+                // Get current document or create new one
+                let statusDoc = await botStatusCollection.findOne({}) || { 
+                    customRotation: [],
+                    interval: 10
+                };
+                
+                if (useCustom && (!statusDoc.customRotation || statusDoc.customRotation.length === 0)) {
+                    return interaction.editReply('❌ No custom statuses added yet. Add some with `/setup-status add` first.');
+                }
+                
+                await botStatusCollection.updateOne({}, { $set: { useCustom } }, { upsert: true });
+                
+                const mode = useCustom ? 'custom rotation' : 'default rotation';
+                return interaction.editReply(`🔄 Status rotation mode set to **${mode}**.`);
+
+            } else if (subcommand === 'reset') {
+                await botStatusCollection.deleteOne({});
+                return interaction.editReply('♻️ Reset to default rotating activities. Will take effect on next cycle.');
+            }
+        } else {
+            const embed = new EmbedBuilder()
+                .setColor('#3498db')
+                .setAuthor({ 
+                    name: "Alert!", 
+                    iconURL: cmdIcons.dotIcon,
+                    url: "https://discord.gg/xQF9f9yUEM"
+                })
+                .setDescription('- This command can only be used through slash commands!\n- Please use `/setup-status`')
                 .setTimestamp();
 
-            // Ticket Setup
-            if (ticketSetup) {
-                mainEmbed.addFields(
-                    { name: 'Ticket Setup', value: '\u200B' },
-                    { name: 'Ticket Channel ID', value: ticketSetup.ticketChannelId || 'N/A', inline: true },
-                    { name: 'Admin Role ID', value: ticketSetup.adminRoleId || 'N/A', inline: true },
-                    { name: 'Active', value: ticketSetup.status ? 'Yes' : 'No', inline: true },
-                );
-            } else {
-                mainEmbed.addFields({ name: 'Ticket Setup', value: 'No ticket setups found for this server.', inline: false });
-            }
-
-            // Voice Channel Setup
-            if (voiceChannelSetup) {
-                mainEmbed.addFields(
-                    { name: 'Voice Channel Setup', value: '\u200B' },
-                    { name: 'Voice Channel ID', value: voiceChannelSetup.voiceChannelId || 'N/A', inline: true },
-                    { name: 'Manager Channel ID', value: voiceChannelSetup.managerChannelId || 'N/A', inline: true },
-                    { name: 'Status', value: voiceChannelSetup.status ? 'Active' : 'Inactive', inline: true }
-                );
-            } else {
-                mainEmbed.addFields({ name: 'Voice Channel Setup', value: 'No voice channel setups found for this server.', inline: false });
-            }
-
-            // NQN Setup
-            if (nqnSetup) {
-                mainEmbed.addFields(
-                    { name: 'NQN Setup', value: '\u200B' },
-                    { name: 'NQN Status', value: nqnSetup.status ? 'Active' : 'Inactive', inline: true }
-                );
-            } else {
-                mainEmbed.addFields({ name: 'NQN Setup', value: 'NQN is not active for this server.', inline: false });
-            }
-
-            // Welcome Setup
-            if (welcomeSetup) {
-                mainEmbed.addFields(
-                    { name: 'Welcome Setup', value: '\u200B' },
-                    { name: 'Welcome Channel ID', value: welcomeSetup.welcomeChannelId || 'N/A', inline: true },
-                    { name: 'Status', value: welcomeSetup.status ? 'Active' : 'Inactive', inline: true }
-                );
-            } else {
-                mainEmbed.addFields({ name: 'Welcome Setup', value: 'No welcome setups found for this server.', inline: false });
-            }
-
-            // Auto-Role Setup
-            if (autoroleSetup) {
-                const role = interaction.guild.roles.cache.get(autoroleSetup.roleId);
-                mainEmbed.addFields(
-                    { name: 'Auto-Role Setup', value: '\u200B' },
-                    { name: 'Role', value: role ? `${role.name} (${role.id})` : 'Role not found', inline: true },
-                    { name: 'Status', value: autoroleSetup.status ? 'Active' : 'Inactive', inline: true }
-                );
-            } else {
-                mainEmbed.addFields({ name: 'Auto-Role Setup', value: 'No auto-role setups found for this server.', inline: false });
-            }
-
-            // Active Giveaways
-            if (activeGiveaways.length > 0) {
-                mainEmbed.addFields(
-                    { name: 'Active Giveaways', value: `Current number of giveaways: **${giveawayCount}**` }
-                );
-            } else {
-                mainEmbed.addFields({ name: 'Active Giveaways', value: 'No active giveaways found.', inline: false });
-            }
-
-            embeds.push(mainEmbed);
-
-            // Anti-Setup Details
-            if (antiSetup) {
-                const antiEmbed = new EmbedBuilder()
-                    .setColor(0x0099ff)
-                    .setTitle('Anti-Setup Details')
-                    .addFields(
-                        { name: 'Anti-Spam', value: antiSetup.antiSpam?.enabled ? 'Enabled' : 'Disabled', inline: true },
-                        { name: 'Message Count', value: antiSetup.antiSpam?.messageCount?.toString() || 'N/A', inline: true },
-                        { name: 'Time Window', value: antiSetup.antiSpam?.timeWindow ? `${antiSetup.antiSpam.timeWindow / 1000} seconds` : 'N/A', inline: true },
-                        { name: 'Action', value: antiSetup.antiSpam?.action || 'N/A', inline: true },
-                        { name: 'Duration', value: antiSetup.antiSpam?.duration ? `${antiSetup.antiSpam.duration / 1000} seconds` : 'N/A', inline: true },
-
-                        { name: 'Anti-Link', value: antiSetup.antiLink?.enabled ? 'Enabled' : 'Disabled', inline: true },
-                        { name: 'Mode', value: antiSetup.antiLink?.mode || 'N/A', inline: true },
-                        { name: 'Link Interval', value: antiSetup.antiLink?.linkInterval ? `${antiSetup.antiLink.linkInterval / 1000} seconds` : 'N/A', inline: true },
-
-                        { name: 'Anti-Nuke', value: antiSetup.antiNuke?.enabled ? 'Enabled' : 'Disabled', inline: true },
-                        { name: 'Channel Delete Limit', value: antiSetup.antiNuke?.channelDeleteLimit?.toString() || 'N/A', inline: true },
-                        { name: 'Channel Delete Time', value: antiSetup.antiNuke?.channelDeleteTime ? `${antiSetup.antiNuke.channelDeleteTime / 1000} seconds` : 'N/A', inline: true },
-                        { name: 'Member Kick Limit', value: antiSetup.antiNuke?.memberKickLimit?.toString() || 'N/A', inline: true },
-                        { name: 'Member Ban Limit', value: antiSetup.antiNuke?.memberBanLimit?.toString() || 'N/A', inline: true },
-
-                        { name: 'Anti-Raid', value: antiSetup.antiRaid?.enabled ? 'Enabled' : 'Disabled', inline: true },
-                        { name: 'Join Limit', value: antiSetup.antiRaid?.joinLimit?.toString() || 'N/A', inline: true },
-                        { name: 'Time Window', value: antiSetup.antiRaid?.timeWindow ? `${antiSetup.antiRaid.timeWindow / 1000} seconds` : 'N/A', inline: true },
-                        { name: 'Action', value: antiSetup.antiRaid?.action || 'N/A', inline: true }
-                    );
-
-                embeds.push(antiEmbed);
-            } else {
-                embeds.push(new EmbedBuilder().setColor(0x0099ff).setTitle('Anti-Setup Details').setDescription('No anti-setup configurations found for this server.'));
-            }
-
-            // Send all embeds
-            await interaction.reply({ embeds });
-
-        } catch (error) {
-            console.error('Error fetching setups:', error);
-            await interaction.reply({ content: 'There was an error fetching the setups.', flags: 64 });
+            await interaction.reply({ embeds: [embed] });
         }
     }
 };
-
-/*
-
-☆.。.:*・°☆.。.:*・°☆.。.:*・°☆.。.:*・°☆
-                                                 
-  _________ ___ ___ ._______   _________    
- /   _____//   |   \|   \   \ /   /  _  \   
- \_____  \/    ~    \   |\   Y   /  /_\  \  
- /        \    Y    /   | \     /    |    \ 
-/_______  /\___|_  /|___|  \___/\____|__  / 
-        \/       \/                     \/  
-                    
-DISCORD :  https://discord.com/invite/xQF9f9yUEM                   
-YouTube : https://www.youtube.com/@GlaceYT                         
-
-Command Verified : ✓  
-Website        : ssrr.tech  
-Test Passed    : ✓
-
-☆.。.:*・°☆.。.:*・°☆.。.:*・°☆.。.:*・°☆
-*/
-
